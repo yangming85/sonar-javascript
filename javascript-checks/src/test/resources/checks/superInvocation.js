@@ -320,6 +320,17 @@ class B41 extends A40 {
     function constructor() {  // OK
     }
   }
+
+  delayedConstructorCreation() {
+    var obj = {};
+    obj.constructor = function() {  // OK
+
+    };
+    var obj2 = {};
+    obj.constructor = function() {
+      super();  // Noncompliant
+    }
+  }
 }
 
 var top_level_object = {

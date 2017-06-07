@@ -66,7 +66,6 @@ import static org.sonar.plugins.javascript.api.tree.Tree.Kind.CONDITIONAL_OR;
 public class CognitiveComplexity extends DoubleDispatchVisitor {
   private FunctionVisitStrategy functionVisitStrategy = new FunctionVisit();
 
-  private int declarationNestingLevel = 0;
   private int nestingLevel = 0;
   private int ownComplexity = 0;
   private int nestedFunctionComplexity = 0;
@@ -82,8 +81,7 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
   private Set<Tree> logicalOperationsToIgnore = new HashSet<>();
 
   public CognitiveComplexity(int declarationNestingLevel) {
-    this.declarationNestingLevel = declarationNestingLevel;
-    this.nestingLevel = this.declarationNestingLevel;
+    this.nestingLevel = declarationNestingLevel;
   }
 
   public CognitiveComplexity() {
@@ -459,12 +457,7 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
         nestingLevel++;
 
       }
-
       propagation.run();
-      leaveFunction();
-    }
-
-    private void leaveFunction() {
       nestingLevel--;
       functionStack.pop();
     }

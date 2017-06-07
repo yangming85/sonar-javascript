@@ -1,4 +1,4 @@
-a; // Noncompliant [[id=1]] {{We do care : 19}}
+a; // Noncompliant [[id=1]] {{We do care : 25}}
 function foo() {
   x && y;
 //S ^^ 1 {{+1}}
@@ -50,4 +50,29 @@ x   && y;
         }
       }
 
+      class NestedClass {
+
+        innerMethod() {
+          if (x) {}
+//S       ^^ 1 {{+2 (incl. 1 for nesting)}}
+        }
+
+      }
+
     }
+
+class TopLevel {
+
+  someMethod() {
+    if (x) {
+//S ^^ 1 {{+1}}
+      class ClassInClass {
+
+        innerMethod() {
+          if (x) {}
+//S       ^^ 1 {{+3 (incl. 2 for nesting)}}
+        }
+      }
+    }
+  }
+}

@@ -33,6 +33,7 @@ public final class CheckList {
 
   public static List<Class> getChecks() {
     return ImmutableList.<Class>of(
+      CognitiveComplexityFileCheck.class,
       AlertUseCheck.class,
       ConditionalUnreachableCodeCheck.class,
       AlwaysUseCurlyBracesCheck.class,

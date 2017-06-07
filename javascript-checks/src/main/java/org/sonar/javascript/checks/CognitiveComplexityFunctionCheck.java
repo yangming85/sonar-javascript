@@ -28,6 +28,7 @@ import org.sonar.javascript.metrics.CognitiveComplexity;
 import org.sonar.javascript.tree.KindSet;
 import org.sonar.plugins.javascript.api.tree.Tree;
 import org.sonar.plugins.javascript.api.tree.Tree.Kind;
+import org.sonar.plugins.javascript.api.tree.declaration.FunctionTree;
 import org.sonar.plugins.javascript.api.tree.expression.ArrowFunctionTree;
 import org.sonar.plugins.javascript.api.tree.lexical.SyntaxToken;
 import org.sonar.plugins.javascript.api.visitors.PreciseIssue;
@@ -49,7 +50,6 @@ public class CognitiveComplexityFunctionCheck extends SubscriptionVisitorCheck {
 
   /* When complexity of nesting function is considered for this check, we ignore all nested in it functions */
   private Set<Tree> ignoredNestedFunctions = new HashSet<>();
-  private final CognitiveComplexity cognitiveComplexity = new CognitiveComplexity();
 
   @Override
   public Set<Kind> nodesToVisit() {
@@ -59,14 +59,13 @@ public class CognitiveComplexityFunctionCheck extends SubscriptionVisitorCheck {
   @Override
   public void visitFile(Tree scriptTree) {
     ignoredNestedFunctions.clear();
-    cognitiveComplexity.clear();
     super.visitFile(scriptTree);
   }
 
   @Override
   public void visitNode(Tree tree) {
     if (!ignoredNestedFunctions.contains(tree)) {
-      CognitiveComplexity.ComplexityData complexityData = cognitiveComplexity.calculateComplexity(tree);
+      CognitiveComplexity.ComplexityData complexityData = new CognitiveComplexity().calculateFunctionComplexity((FunctionTree) tree);
       ignoredNestedFunctions.addAll(complexityData.aggregatedNestedFunctions());
 
       if (complexityData.complexity() > threshold) {

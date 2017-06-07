@@ -1,0 +1,24 @@
+<p>Array literals should always be preferred to Array constructors.</p>
+<p>Array constructors are error-prone due to the way their arguments are interpreted. If more than one argument is used, the array length will be
+equal to the number of arguments. However, using a single argument will have one of three consequences:</p>
+<ul>
+  <li> If the argument is a number and it is a natural number the length will be equal to the value of the argument. </li>
+  <li> If the argument is a number, but not a natural number an exception will be thrown. </li>
+  <li> Otherwise the array will have one element with the argument as its value. </li>
+</ul>
+<p>For these reasons, if someone changes the code to pass 1 argument instead of 2 arguments, the array might not have the expected length. To avoid
+these kinds of weird cases, always use the more readable array.</p>
+<h2>Noncompliant Code Example</h2>
+<pre>
+var a1 = new Array(x1, x2, x3);  // Noncompliant. Results in 3-element array.
+var a2 = new Array(x1); // Noncompliant and variable in results
+var a3 = new Array();  // Noncompliant. Results in 0-element array.
+
+</pre>
+<h2>Compliant Solution</h2>
+<pre>
+var a1 = [x1, x2, x3];
+var a2 = [x1];
+var a3 = [];
+</pre>
+

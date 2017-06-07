@@ -23,8 +23,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -58,69 +60,73 @@ import org.sonar.plugins.javascript.api.visitors.DoubleDispatchVisitor;
 import org.sonar.plugins.javascript.api.visitors.IssueLocation;
 import org.sonar.plugins.javascript.api.visitors.SubscriptionVisitor;
 
-import static com.sun.tools.internal.xjc.reader.Ring.add;
 import static org.sonar.plugins.javascript.api.tree.Tree.Kind.CONDITIONAL_AND;
 import static org.sonar.plugins.javascript.api.tree.Tree.Kind.CONDITIONAL_OR;
 
 public class CognitiveComplexity extends DoubleDispatchVisitor {
-  private int nestingLevel;
-  private int ownComplexity;
-  private int nestedFunctionComplexity;
+  private FunctionVisitStrategy functionVisitStrategy = new FunctionVisit();
 
-  private boolean functionContainsStructuralComplexity;
+  private int declarationNestingLevel = 0;
+  private int nestingLevel = 0;
+  private int ownComplexity = 0;
+  private int nestedFunctionComplexity = 0;
+
+  private boolean functionContainsStructuralComplexity = false;
 
   private List<IssueLocation> ownIssueLocations = new ArrayList<>();
   private List<IssueLocation> nestedFunctionsIssueLocations = new ArrayList<>();
 
-  private Tree currentFunction = null;
+  private FunctionTree topCognitiveScopeFunction = null;
   private Set<FunctionTree> nestedFunctions = new HashSet<>();
   private Deque<Tree> functionStack = new ArrayDeque<>();
   private Set<Tree> logicalOperationsToIgnore = new HashSet<>();
 
-  public ComplexityData calculateComplexity(Tree functionTree) {
+  public CognitiveComplexity(int declarationNestingLevel) {
+    this.declarationNestingLevel = declarationNestingLevel;
+    this.nestingLevel = this.declarationNestingLevel;
+  }
+
+  public CognitiveComplexity() {
+  }
+
+  public ComplexityData calculateFunctionComplexity(FunctionTree functionTree) {
+    topCognitiveScopeFunction = functionTree;
     functionTree.accept(this);
     return buildComplexityData();
   }
 
   public ComplexityData calculateScriptComplexity(ScriptTree tree) {
+    functionVisitStrategy = new NoFunctionVisit();
+    tree.accept(this);
+
     List<FunctionTree> functions = FunctionVisitor.collectAllFunctions(tree);
     Set<CognitiveComplexity.ComplexityData> complexities = new HashSet<>();
     Set<FunctionTree> alreadyProcessedFunctions = new HashSet<>();
     for (FunctionTree function : functions) {
       if(!alreadyProcessedFunctions.contains(function)) {
-        ComplexityData complexityData = new CognitiveComplexity().calculateComplexity(function);
+        int declarationNestingLevel = functionVisitStrategy.functionDeclarationNesting(function);
+        ComplexityData complexityData = new CognitiveComplexity(declarationNestingLevel).calculateFunctionComplexity(function);
         complexities.add(complexityData);
         alreadyProcessedFunctions.addAll(complexityData.aggregatedNestedFunctions());
+
+        complexityData.ignoredNestedFunctions.forEach(functionTree -> functionVisitStrategy.addDeclarationNesting(functionTree, declarationNestingLevel));
       }
     }
-    Integer fileComplexity = complexities.stream().map(ComplexityData::complexity).reduce(0, Integer::sum);
+    Integer fileComplexity = complexities.stream().map(ComplexityData::complexity).reduce(0, Integer::sum) + ownComplexity;
     List<IssueLocation> locations = complexities.stream().flatMap(data -> data.secondaryLocations().stream()).collect(Collectors.toList());
-    return new ComplexityData(fileComplexity, locations, Collections.emptySet());
+    locations.addAll(ownIssueLocations);
+    return new ComplexityData(fileComplexity, locations, Collections.emptySet(), Collections.emptySet());
   }
 
   public void clear() {
-    currentFunction = null;
-  }
-
-  private void initComplexityCalculation(Tree tree) {
-    nestingLevel = 0;
-    ownIssueLocations = new ArrayList<>();
-    nestedFunctionsIssueLocations = new ArrayList<>();
-    ownComplexity = 0;
-    nestedFunctionComplexity = 0;
-    functionContainsStructuralComplexity = false;
-    currentFunction = tree;
-    nestedFunctions.clear();
-    logicalOperationsToIgnore.clear();
-
-    functionStack.clear();
-    functionStack.push(currentFunction);
+    topCognitiveScopeFunction = null;
   }
 
   private ComplexityData buildComplexityData() {
     int complexity;
     Set<FunctionTree> aggregatedNestedFunctions = new HashSet<>();
     List<IssueLocation> allIssueLocations = new ArrayList<>(ownIssueLocations);
+    Set<FunctionTree> ignoredNestedFunctions = new HashSet<>();
 
     if (functionContainsStructuralComplexity) {
       complexity = ownComplexity + nestedFunctionComplexity;
@@ -128,9 +134,10 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
       allIssueLocations.addAll(nestedFunctionsIssueLocations);
     } else {
       complexity = ownComplexity;
+      ignoredNestedFunctions = nestedFunctions;
     }
 
-    return new ComplexityData(complexity, allIssueLocations, aggregatedNestedFunctions);
+    return new ComplexityData(complexity, allIssueLocations, aggregatedNestedFunctions, ignoredNestedFunctions);
   }
 
   @Override
@@ -276,7 +283,7 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
   }
 
   private void addComplexityWithNesting(SyntaxToken secondaryLocationToken) {
-    if (functionStack.peek().equals(currentFunction)) {
+    if (isWithinTopCognitiveScope()) {
       functionContainsStructuralComplexity = true;
     }
     addComplexity(nestingLevel + 1, secondaryLocationToken);
@@ -288,13 +295,17 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
 
   private void addComplexity(int addedComplexity, SyntaxToken secondaryLocationToken) {
     IssueLocation secondaryLocation = new IssueLocation(secondaryLocationToken, secondaryMessage(addedComplexity));
-    if (functionStack.peek().equals(currentFunction)) {
+    if (isWithinTopCognitiveScope()) {
       ownComplexity += addedComplexity;
       ownIssueLocations.add(secondaryLocation);
     } else {
       nestedFunctionComplexity += addedComplexity;
       nestedFunctionsIssueLocations.add(secondaryLocation);
     }
+  }
+
+  private boolean isWithinTopCognitiveScope() {
+    return functionStack.isEmpty() || functionStack.peek().equals(topCognitiveScopeFunction);
   }
 
   private static String secondaryMessage(int complexity) {
@@ -308,61 +319,27 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
 
   @Override
   public void visitFunctionDeclaration(FunctionDeclarationTree tree) {
-      visitFunction(tree);
-
-      super.visitFunctionDeclaration(tree);
-      leaveFunction(tree);
+    functionVisitStrategy.visitFunctionDeclaration(tree);
   }
 
   @Override
   public void visitArrowFunction(ArrowFunctionTree tree) {
-      visitFunction(tree);
-
-      super.visitArrowFunction(tree);
-
-      leaveFunction(tree);
+    functionVisitStrategy.visitArrowFunction(tree);
   }
 
   @Override
   public void visitFunctionExpression(FunctionExpressionTree tree) {
-    visitFunction(tree);
-    super.visitFunctionExpression(tree);
-    leaveFunction(tree);
+    functionVisitStrategy.visitFunctionExpression(tree);
   }
 
   @Override
   public void visitMethodDeclaration(MethodDeclarationTree tree) {
-    visitFunction(tree);
-    super.visitMethodDeclaration(tree);
-    leaveFunction(tree);
+    functionVisitStrategy.visitMethodDeclaration(tree);
   }
 
   @Override
   public void visitAccessorMethodDeclaration(AccessorMethodDeclarationTree tree) {
-    visitFunction(tree);
-    super.visitAccessorMethodDeclaration(tree);
-    leaveFunction(tree);
-  }
-
-  private void visitFunction(FunctionTree tree) {
-    if (currentFunction == null) {
-      initComplexityCalculation(tree);
-
-    } else {
-      nestedFunctions.add(tree);
-      functionStack.push(tree);
-      nestingLevel++;
-    }
-  }
-
-  private void leaveFunction(FunctionTree tree) {
-    if (tree.equals(currentFunction)) {
-      currentFunction = null;
-
-    } else {
-      nestingLevel--;
-      functionStack.pop();
-    }
+    functionVisitStrategy.visitAccessorMethodDeclaration(tree);
   }
 
   private static boolean isElseIf(IfStatementTree tree) {
@@ -373,11 +350,13 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
     private int complexity;
     private List<IssueLocation> secondaryLocations;
     private Set<FunctionTree> aggregatedNestedFunctions;
+    private Set<FunctionTree> ignoredNestedFunctions;
 
-    ComplexityData(int complexity, List<IssueLocation> secondaryLocations, Set<FunctionTree> aggregatedNestedFunctions) {
+    ComplexityData(int complexity, List<IssueLocation> secondaryLocations, Set<FunctionTree> aggregatedNestedFunctions, Set<FunctionTree> ignoredNestedFunctions) {
       this.complexity = complexity;
       this.secondaryLocations = secondaryLocations;
       this.aggregatedNestedFunctions = aggregatedNestedFunctions;
+      this.ignoredNestedFunctions = ignoredNestedFunctions;
     }
 
     public int complexity() {
@@ -410,6 +389,109 @@ public class CognitiveComplexity extends DoubleDispatchVisitor {
     @Override
     public void visitNode(Tree tree) {
       collectedFunctions.add((FunctionTree) tree);
+    }
+  }
+
+  private interface FunctionVisitStrategy {
+    default void visitFunctionExpression(FunctionExpressionTree tree){}
+    default void visitFunctionDeclaration(FunctionDeclarationTree tree){}
+    default void visitMethodDeclaration(MethodDeclarationTree tree){}
+    default void visitArrowFunction(ArrowFunctionTree tree){}
+    default void visitAccessorMethodDeclaration(AccessorMethodDeclarationTree tree){}
+
+    default int functionDeclarationNesting(FunctionTree tree) {
+      return 0;
+    }
+
+    default void addDeclarationNesting(FunctionTree functionTree, int declarationNestingLevel){}
+  }
+
+  private class NoFunctionVisit implements FunctionVisitStrategy {
+    Map<FunctionTree, Integer> functionDeclarationNesting = new HashMap<>();
+
+    private void saveNestingLevel(FunctionTree tree) {
+      functionDeclarationNesting.put(tree, nestingLevel);
+    }
+
+    @Override
+    public void visitFunctionExpression(FunctionExpressionTree tree) {
+      saveNestingLevel(tree);
+    }
+
+    @Override
+    public void visitFunctionDeclaration(FunctionDeclarationTree tree) {
+      saveNestingLevel(tree);
+    }
+
+    @Override
+    public void visitMethodDeclaration(MethodDeclarationTree tree) {
+      saveNestingLevel(tree);
+    }
+
+    @Override
+    public void visitArrowFunction(ArrowFunctionTree tree) {
+      saveNestingLevel(tree);
+    }
+
+    @Override
+    public void visitAccessorMethodDeclaration(AccessorMethodDeclarationTree tree) {
+      saveNestingLevel(tree);
+    }
+
+    @Override
+    public int functionDeclarationNesting(FunctionTree tree) {
+      return functionDeclarationNesting.getOrDefault(tree, 0);
+    }
+
+    @Override
+    public void addDeclarationNesting(FunctionTree functionTree, int declarationNestingLevel) {
+      functionDeclarationNesting.put(functionTree, declarationNestingLevel);
+    }
+  }
+
+  private class FunctionVisit implements FunctionVisitStrategy {
+
+    private void visitFunction(FunctionTree tree, Runnable propagation) {
+      functionStack.push(tree);
+
+      if (!isWithinTopCognitiveScope()) {
+        nestedFunctions.add(tree);
+        nestingLevel++;
+
+      }
+
+      propagation.run();
+      leaveFunction();
+    }
+
+    private void leaveFunction() {
+      nestingLevel--;
+      functionStack.pop();
+    }
+
+    @Override
+    public void visitFunctionExpression(FunctionExpressionTree tree) {
+      visitFunction(tree, () -> CognitiveComplexity.super.visitFunctionExpression(tree));
+    }
+
+    @Override
+    public void visitFunctionDeclaration(FunctionDeclarationTree tree) {
+      visitFunction(tree, () -> CognitiveComplexity.super.visitFunctionDeclaration(tree));
+    }
+
+    @Override
+    public void visitMethodDeclaration(MethodDeclarationTree tree) {
+      visitFunction(tree, () -> CognitiveComplexity.super.visitMethodDeclaration(tree));
+    }
+
+    @Override
+    public void visitArrowFunction(ArrowFunctionTree tree) {
+      visitFunction(tree, () -> CognitiveComplexity.super.visitArrowFunction(tree));
+    }
+
+    @Override
+    public void visitAccessorMethodDeclaration(AccessorMethodDeclarationTree tree) {
+      visitFunction(tree, () -> CognitiveComplexity.super.visitAccessorMethodDeclaration(tree));
     }
   }
 }

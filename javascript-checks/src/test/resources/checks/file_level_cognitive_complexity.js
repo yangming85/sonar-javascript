@@ -1,4 +1,4 @@
-a; // Noncompliant [[id=1]] {{We do care : 25}}
+a; // Noncompliant [[id=1]] {{25}}
 function foo() {
   x && y;
 //S ^^ 1 {{+1}}

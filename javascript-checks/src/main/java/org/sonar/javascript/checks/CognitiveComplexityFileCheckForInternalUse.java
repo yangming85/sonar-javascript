@@ -19,17 +19,20 @@
  */
 package org.sonar.javascript.checks;
 
-import java.io.File;
-import org.junit.Test;
-import org.sonar.javascript.checks.verifier.JavaScriptCheckVerifier;
 
-public class CognitiveComplexityFileCheckTest {
+import org.sonar.javascript.metrics.CognitiveComplexity;
+import org.sonar.javascript.metrics.CognitiveComplexity.ComplexityData;
+import org.sonar.plugins.javascript.api.tree.ScriptTree;
+import org.sonar.plugins.javascript.api.visitors.DoubleDispatchVisitorCheck;
+import org.sonar.plugins.javascript.api.visitors.PreciseIssue;
 
-  private CognitiveComplexityFileCheck check = new CognitiveComplexityFileCheck();
+public class CognitiveComplexityFileCheckForInternalUse extends DoubleDispatchVisitorCheck {
 
-  @Test
-  public void test() {
-    JavaScriptCheckVerifier.verify(check, new File("src/test/resources/checks/CognitiveComplexityFunctionCheck/file1.js"));
+
+  @Override
+  public void visitScript(ScriptTree tree) {
+    ComplexityData complexityData = new CognitiveComplexity().calculateScriptComplexity(tree);
+    PreciseIssue preciseIssue = addIssue(tree.firstToken(), "" + complexityData.complexity());
+    complexityData.secondaryLocations().forEach(preciseIssue::secondary);
   }
-
 }

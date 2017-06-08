@@ -38,13 +38,11 @@ public class MetricsTest extends JavaScriptTreeModelTest {
     assertThat(new ComplexityVisitor(true).getComplexity(tree)).isEqualTo(25);
   }
 
-//  @Ignore
-//  @Test
-//  public void cognitive_complexity() {
-//    Tree tree = parse(new File("src/test/resources/metrics/cognitive_complexity.js"));
-//    final int complexityData = FileCognitiveComplexity.calculateComplexity(tree);
-//    assertThat(complexityData).isEqualTo(27);
-//  }
+  @Test
+  public void cognitive_complexity() {
+    ScriptTree tree = parse(new File("src/test/resources/metrics/cognitive_complexity.js"));
+    assertThat(new CognitiveComplexity().calculateScriptComplexity(tree).complexity()).isEqualTo(9);
+  }
 
   @Test
   public void lines_of_code() {
